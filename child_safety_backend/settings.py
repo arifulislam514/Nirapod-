@@ -163,9 +163,6 @@ USE_I18N = True
 USE_TZ = True
 
 
-
-
-
 # ── drf-spectacular ────────────────────────────────────────────────────────────
 SPECTACULAR_SETTINGS = {
     'TITLE': 'Child Safety Alert System API',
@@ -233,3 +230,8 @@ Messages received:
 
 
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+CSRF_TRUSTED_ORIGINS = config(
+    'CSRF_TRUSTED_ORIGINS',
+    default='http://localhost:8000'
+).split(',')
