@@ -7,10 +7,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config('SECRET_KEY')
 DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*').split(',')
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1').split(',')
 
 INSTALLED_APPS = [
-    'daphne',  # must be first for ASGI
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -70,15 +70,15 @@ ASGI_APPLICATION = 'child_safety_backend.asgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('DB_NAME'),
-        'USER': config('DB_USER'),
+        'NAME':     config('DB_NAME'),
+        'USER':     config('DB_USER'),
         'PASSWORD': config('DB_PASSWORD'),
-        'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='5432'),
+        'HOST':     config('DB_HOST', default='localhost'),
+        'PORT':     config('DB_PORT', default='5432'),
     }
 }
 
-# ── Django Channels + Redis ────────────────────────────────────────────────────
+# ── Django Channels (WebSocket) ────────────────────────────────────────────────
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
@@ -87,12 +87,6 @@ CHANNEL_LAYERS = {
         },
     }
 }
-
-# ── Celery ─────────────────────────────────────────────────────────────────────
-CELERY_BROKER_URL = config('REDIS_URL', default='redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = config('REDIS_URL', default='redis://localhost:6379/0')
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 AUTH_USER_MODEL = 'accounts.CustomUser'
@@ -117,9 +111,9 @@ REST_FRAMEWORK = {
 
 # ── SimpleJWT ──────────────────────────────────────────────────────────────────
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=12),
+    'ACCESS_TOKEN_LIFETIME':  timedelta(hours=12),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
-    'AUTH_HEADER_TYPES': ('JWT',),  # "JWT <token>", not "Bearer"
+    'AUTH_HEADER_TYPES': ('JWT',),
 }
 
 # ── Djoser ─────────────────────────────────────────────────────────────────────
@@ -127,8 +121,8 @@ DJOSER = {
     'LOGIN_FIELD': 'email',
     'USER_CREATE_PASSWORD_RETYPE': True,
     'SERIALIZERS': {
-        'user_create': 'accounts.serializers.RegisterSerializer',
-        'current_user': 'accounts.serializers.UserProfileSerializer',
+        'user_create':    'accounts.serializers.RegisterSerializer',
+        'current_user':   'accounts.serializers.UserProfileSerializer',
     },
 }
 
@@ -137,19 +131,21 @@ CORS_ALLOWED_ORIGINS = config(
     'CORS_ALLOWED_ORIGINS',
     default='http://localhost:5173,http://localhost:3000'
 ).split(',')
-
-# Allow all origins in dev, restrict in prod via CORS_ALLOWED_ORIGINS env var
 CORS_ALLOW_ALL_ORIGINS = config('CORS_ALLOW_ALL_ORIGINS', default=False, cast=bool)
 CORS_ALLOW_CREDENTIALS = True
 
-# ── SMS ────────────────────────────────────────────────────────────────────────
-SMS_API_KEY = config('SMS_API_KEY', default='')
-SMS_SENDER_ID = config('SMS_SENDER_ID', default='ChildSafe')
+# ── CSRF (required for Render deployment) ─────────────────────────────────────
+CSRF_TRUSTED_ORIGINS = config(
+    'CSRF_TRUSTED_ORIGINS',
+    default='http://localhost:8000'
+).split(',')
 
-# ── Static ─────────────────────────────────────────────────────────────────────
-STATIC_URL = '/static/'
+# ── Static files ───────────────────────────────────────────────────────────────
+STATIC_URL  = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
+# ── Auth password validators ───────────────────────────────────────────────────
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
@@ -162,38 +158,22 @@ TIME_ZONE = 'Asia/Dhaka'
 USE_I18N = True
 USE_TZ = True
 
-
 # ── drf-spectacular ────────────────────────────────────────────────────────────
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'Child Safety Alert System API',
+    'TITLE': 'Nirapod — Child Safety Alert System API',
     'DESCRIPTION': """
-## Child Safety & Personal Protection Alert System
+## Nirapod (নিরাপদ) — Child Safety & Personal Protection Alert System
 
 ---
 
 ### Two Authentication Methods
 
-**1. JWT Token** — for all frontend/dashboard endpoints.
-
-Get it: `POST /api/auth/jwt/create/` with email + password.
-
-Use it — add this header to every request:
+**1. JWT Token** — for frontend/dashboard:
 ```
 Authorization: JWT your-access-token
 ```
-Click **Authorize 🔒** at the top and enter `JWT your-access-token`.
 
-Token expires after **12 hours**. Renew with `POST /api/auth/jwt/refresh/`.
-
----
-
-**2. Device Token** — only for ESP32 hardware endpoints.
-
-Used only on `POST /api/locations/` and `POST /api/alerts/`.
-
-Get it when registering a device: `POST /api/devices/`
-
-Add this header:
+**2. Device Token** — for ESP32 hardware only:
 ```
 X-Device-Token: your-64-char-device-token
 ```
@@ -201,25 +181,19 @@ X-Device-Token: your-64-char-device-token
 ---
 
 ### WebSocket — Real-Time Updates
-
-Connect to receive live GPS and alerts without polling:
 ```
-ws://localhost:8000/ws/device/{device_id}/
+ws://your-domain/ws/device/{device_id}/
 ```
-
-Messages received:
-```json
-{"type": "location", "lat": "23.726008", "lon": "90.406723", "ts": "2025-01-15T14:35:00Z"}
-{"type": "alert", "alert_type": "PANIC", "lat": "23.726008", "lon": "90.406723"}
-```
+Receives: `{"type": "location", "lat": "...", "lon": "...", "ts": "..."}`
+Receives: `{"type": "alert", "alert_type": "PANIC", "lat": "...", "lon": "..."}`
     """,
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
     'POSTPROCESSING_HOOKS': [
         'drf_spectacular.hooks.postprocess_schema_enums',
         'child_safety_backend.schema_filters.remap_tags',
     ],
-    'COMPONENT_SPLIT_REQUEST': True,
     'SWAGGER_UI_SETTINGS': {
         'persistAuthorization': True,
         'displayRequestDuration': True,
@@ -227,11 +201,3 @@ Messages received:
         'docExpansion': 'none',
     },
 }
-
-
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
-
-CSRF_TRUSTED_ORIGINS = config(
-    'CSRF_TRUSTED_ORIGINS',
-    default='http://localhost:8000'
-).split(',')

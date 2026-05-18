@@ -1,20 +1,10 @@
-# Environment
 venv/
 .env
-
-# Python
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-.Python
-
-# Django
+*.sqlite3
 staticfiles/
 media/
-*.sqlite3
-
-# OS
 .DS_Store
 Thumbs.db
-quick run command.txt
+codebase_explained.md

@@ -1,0 +1,9 @@
+:: Window 1
+cd C:\Projects\child_safety_backend
+venv\Scripts\activate
+daphne -b 0.0.0.0 -p 8000 child_safety_backend.asgi:application
+
+:: Window 2
+cd C:\Projects\child_safety_backend
+venv\Scripts\activate
+celery -A child_safety_backend worker --loglevel=info --pool=solo

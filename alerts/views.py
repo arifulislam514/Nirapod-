@@ -9,7 +9,7 @@ from drf_spectacular.types import OpenApiTypes
 from devices.models import Device
 from .models import AlertEvent
 from .serializers import AlertEventSerializer
-from .tasks import send_sms_alert
+from .tasks import send_alert_notification   # plain function — no Celery
 
 
 class AlertEventViewSet(viewsets.ModelViewSet):
@@ -20,7 +20,6 @@ class AlertEventViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'post', 'put', 'head', 'options']
 
     def get_queryset(self):
-        # Guard for drf-spectacular schema generation
         if getattr(self, 'swagger_fake_view', False):
             return AlertEvent.objects.none()
         return AlertEvent.objects.filter(
@@ -43,22 +42,20 @@ X-Device-Token: your-64-char-device-token
 | Field | Type | Required | Description |
 |---|---|---|---|
 | alert_type | string | ✅ | One of: `PANIC`, `GEOFENCE`, `MOTION` |
-| latitude | decimal string | ❌ | GPS latitude at time of alert e.g. `23.726008` |
-| longitude | decimal string | ❌ | GPS longitude at time of alert e.g. `90.406723` |
+| latitude | decimal string | ❌ | GPS latitude at time of alert |
+| longitude | decimal string | ❌ | GPS longitude at time of alert |
 
 **Alert types:**
 | Value | When triggered |
 |---|---|
 | `PANIC` | Child pressed the SOS/panic button |
 | `GEOFENCE` | Child left a defined safe zone |
-| `MOTION` | Suspicious motion detected by sensor |
+| `MOTION` | Suspicious motion detected |
 
-**What happens automatically:**
-1. Alert is saved to the database
-2. Celery task fires in the background:
-   - Sends SMS to the parent phone (dev mode: printed in Celery terminal)
-   - Pushes real-time WebSocket notification to parent dashboard:
-     `{"type": "alert", "alert_type": "PANIC", "lat": "...", "lon": "..."}`
+**What happens after posting:**
+1. Alert saved to database
+2. Real-time WebSocket notification pushed to parent dashboard
+3. SMS is sent directly by the ESP32 SIM800L hardware (independent of this API)
         """,
         request=AlertEventSerializer,
         responses={
@@ -77,14 +74,16 @@ X-Device-Token: your-64-char-device-token
                 value={'alert_type': 'MOTION',
                        'latitude': '23.726008', 'longitude': '90.406723'}),
             OpenApiExample('Alert Created (201)', response_only=True, status_codes=['201'],
-                value={'id': 'd4e5f6a7-...', 'device': 'b2c3d4e5-...',
-                       'device_name': 'Riya School Device',
-                       'alert_type': 'PANIC',
-                       'alert_type_display': 'Panic Button',
-                       'latitude': '23.726008', 'longitude': '90.406723',
-                       'sms_sent': False, 'sms_sent_at': None,
-                       'resolved': False,
-                       'timestamp': '2025-01-15T14:40:00Z'}),
+                value={
+                    'id': 'd4e5f6a7-...', 'device': 'b2c3d4e5-...',
+                    'device_name': 'Riya School Device',
+                    'alert_type': 'PANIC',
+                    'alert_type_display': 'Panic Button',
+                    'latitude': '23.726008', 'longitude': '90.406723',
+                    'sms_sent': False, 'sms_sent_at': None,
+                    'resolved': False,
+                    'timestamp': '2025-01-15T14:40:00Z',
+                }),
         ],
         tags=['4. Alerts'],
     )
@@ -97,7 +96,11 @@ X-Device-Token: your-64-char-device-token
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         alert = serializer.save(device=device)
-        send_sms_alert.delay(str(alert.id))
+
+        # Call directly — no Celery needed
+        # SMS is handled by ESP32 SIM800L independently
+        send_alert_notification(str(alert.id))
+
         return Response(AlertEventSerializer(alert).data, status=status.HTTP_201_CREATED)
 
     @extend_schema(
@@ -105,59 +108,29 @@ X-Device-Token: your-64-char-device-token
         description="""
 **Authentication:** `Authorization: JWT your-access-token`
 
-**What to send:** Optional query parameters to filter results.
-
 **Query parameters:**
 | Parameter | Example | Description |
 |---|---|---|
-| device | `?device=uuid` | Filter by device UUID — get from GET /api/devices/ |
-| resolved | `?resolved=false` | `false` = active alerts only, `true` = resolved only |
-| alert_type | `?alert_type=PANIC` | Filter by type: `PANIC`, `GEOFENCE`, or `MOTION` |
+| device | `?device=uuid` | Filter by device UUID |
+| resolved | `?resolved=false` | `false` = active alerts only |
+| alert_type | `?alert_type=PANIC` | Filter by type |
 
 **Example URLs:**
 ```
-GET /api/alerts/?device=uuid
 GET /api/alerts/?device=uuid&resolved=false
 GET /api/alerts/?device=uuid&alert_type=PANIC
-GET /api/alerts/?device=uuid&resolved=false&alert_type=GEOFENCE
 ```
-
-**What you get back:** Paginated list of alerts, newest first.
-
-**Response fields:**
-| Field | Type | Description |
-|---|---|---|
-| id | UUID | Alert ID — use for detail or resolve endpoint |
-| device | UUID | Device that triggered this alert |
-| device_name | string | Friendly name of the device |
-| alert_type | string | `PANIC`, `GEOFENCE`, or `MOTION` |
-| alert_type_display | string | Human readable: `Panic Button`, `Geofence Breach`, `Suspicious Motion` |
-| latitude / longitude | decimal | Location where alert was triggered |
-| sms_sent | boolean | Whether SMS was sent to parent |
-| sms_sent_at | datetime / null | When the SMS was sent |
-| resolved | boolean | `false` = active, `true` = parent marked resolved |
-| timestamp | datetime | When the alert occurred |
         """,
         parameters=[
             OpenApiParameter('device', OpenApiTypes.UUID, OpenApiParameter.QUERY,
                 description='Device UUID from GET /api/devices/'),
             OpenApiParameter('resolved', OpenApiTypes.BOOL, OpenApiParameter.QUERY,
-                description='false = active alerts only, true = resolved alerts only'),
+                description='false = active alerts, true = resolved alerts'),
             OpenApiParameter('alert_type', OpenApiTypes.STR, OpenApiParameter.QUERY,
-                description='PANIC, GEOFENCE, or MOTION', enum=['PANIC', 'GEOFENCE', 'MOTION']),
+                description='PANIC, GEOFENCE, or MOTION',
+                enum=['PANIC', 'GEOFENCE', 'MOTION']),
         ],
         responses={200: AlertEventSerializer(many=True)},
-        examples=[
-            OpenApiExample('Alerts List (200)', response_only=True, status_codes=['200'],
-                value={'count': 3, 'next': None, 'previous': None, 'results': [
-                    {'id': 'd4e5f6a7-...', 'device': 'b2c3d4e5-...',
-                     'device_name': 'Riya School Device',
-                     'alert_type': 'PANIC', 'alert_type_display': 'Panic Button',
-                     'latitude': '23.726008', 'longitude': '90.406723',
-                     'sms_sent': True, 'sms_sent_at': '2025-01-15T14:40:02Z',
-                     'resolved': False, 'timestamp': '2025-01-15T14:40:00Z'}
-                ]}),
-        ],
         tags=['4. Alerts'],
     )
     def list(self, request, *args, **kwargs):
@@ -169,14 +142,10 @@ GET /api/alerts/?device=uuid&resolved=false&alert_type=GEOFENCE
 **Authentication:** `Authorization: JWT your-access-token`
 
 **What to send:** Alert UUID in the URL.
-
-**What you get back:** Full alert object with all fields.
-
-**Use case:** Show full alert details when a parent taps on a notification.
         """,
         responses={
             200: AlertEventSerializer,
-            404: OpenApiResponse(description='Alert not found or belongs to a different user'),
+            404: OpenApiResponse(description='Alert not found'),
         },
         tags=['4. Alerts'],
     )
@@ -188,29 +157,17 @@ GET /api/alerts/?device=uuid&resolved=false&alert_type=GEOFENCE
         description="""
 **Authentication:** `Authorization: JWT your-access-token`
 
-**What to send:** Nothing in the body. Just the alert UUID in the URL.
+**URL:** `PUT /api/alerts/{alert-uuid}/resolve/`
 
-**URL format:** `PUT /api/alerts/{alert-uuid}/resolve/`
+**Body:** Nothing required.
 
-**What you get back:**
-```json
-{"status": "resolved"}
-```
+**Returns:** `{"status": "resolved"}`
 
-**What changes:** The alert's `resolved` field becomes `true`.
-The alert stays in the database — it will no longer appear in `?resolved=false` queries.
-
-**Use case:** Parent receives a PANIC alert, calls the child, confirms they are safe,
-then taps "Mark as Resolved" to dismiss it from the active alerts list.
-
-**Error cases:**
-| Status | Meaning |
-|---|---|
-| 404 | Alert UUID not found or belongs to a different user |
+Sets `resolved=true` on the alert. Alert stays in DB for history.
         """,
         request=None,
         responses={
-            200: OpenApiResponse(description='Alert resolved successfully'),
+            200: OpenApiResponse(description='Alert resolved'),
             404: OpenApiResponse(description='Alert not found'),
         },
         examples=[
