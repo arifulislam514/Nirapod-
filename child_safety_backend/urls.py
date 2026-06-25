@@ -23,4 +23,5 @@ urlpatterns = [
     path('api/', include('locations.urls')),
     path('api/', include('alerts.urls')),
     path('api/', include('geofences.urls')),
+    path('api/', include('contacts.urls')),
 ]

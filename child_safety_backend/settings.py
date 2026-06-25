@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     'locations',
     'alerts',
     'geofences',
+    'contacts',
 ]
 
 MIDDLEWARE = [
