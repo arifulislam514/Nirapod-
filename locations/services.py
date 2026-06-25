@@ -35,6 +35,8 @@ def record_location(device: Device, data: dict) -> LocationReading:
             'lat': str(reading.latitude),
             'lon': str(reading.longitude),
             'timestamp': reading.timestamp.isoformat(),
+            'speed': str(reading.speed) if reading.speed is not None else None,
+            'accuracy': str(reading.accuracy) if reading.accuracy is not None else None,
         },
     )
 

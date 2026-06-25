@@ -16,6 +16,7 @@ from django.utils import timezone
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from .models import AlertEvent
+from .serializers import AlertEventSerializer
 
 
 def send_alert_notification(alert_id: str):
@@ -53,14 +54,14 @@ def send_alert_notification(alert_id: str):
     print('=' * 60 + '\n')
 
     # ── Push real-time WebSocket notification to parent dashboard ──────────────
-    # This notifies any open browser/app dashboard instantly
+    # This notifies any open browser/app dashboard instantly. The full serialized
+    # alert is sent so the dashboard has id, timestamp, device_name,
+    # alert_type_display, sms_sent and resolved without a follow-up REST call.
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         f'device_{alert.device_id}',
         {
-            'type':       'alert_event',
-            'alert_type': alert.alert_type,
-            'lat':        str(alert.latitude)  if alert.latitude  else None,
-            'lon':        str(alert.longitude) if alert.longitude else None,
+            'type':  'alert_event',
+            'alert': AlertEventSerializer(alert).data,
         },
     )

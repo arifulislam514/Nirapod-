@@ -49,3 +49,53 @@ class MeView(APIView):
     )
     def get(self, request):
         return Response(UserProfileSerializer(request.user).data)
+
+    @extend_schema(
+        summary='Partially update my profile',
+        description="""
+**Authentication:** `Authorization: JWT your-access-token`
+
+**What to send:** Any subset of: `name`, `phone`, `email`.
+
+**What you get back:** Your updated full account profile.
+        """,
+        request=UserProfileSerializer,
+        responses={
+            200: UserProfileSerializer,
+            400: OpenApiResponse(description='Validation error'),
+            401: OpenApiResponse(description='Missing or invalid JWT token'),
+        },
+        tags=['1. Authentication'],
+    )
+    def patch(self, request):
+        serializer = UserProfileSerializer(
+            request.user, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    @extend_schema(
+        summary='Fully update my profile',
+        description="""
+**Authentication:** `Authorization: JWT your-access-token`
+
+**What to send:** All of: `name`, `phone`, `email`.
+
+**What you get back:** Your updated full account profile.
+        """,
+        request=UserProfileSerializer,
+        responses={
+            200: UserProfileSerializer,
+            400: OpenApiResponse(description='Validation error'),
+            401: OpenApiResponse(description='Missing or invalid JWT token'),
+        },
+        tags=['1. Authentication'],
+    )
+    def put(self, request):
+        serializer = UserProfileSerializer(
+            request.user, data=request.data, partial=False
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
